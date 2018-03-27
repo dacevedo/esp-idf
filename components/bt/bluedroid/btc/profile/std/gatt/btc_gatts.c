@@ -527,6 +527,11 @@ static void btc_gatts_cb_param_copy_free(btc_msg_t *msg, tBTA_GATTS *p_data)
             osi_free(p_data->req_data.p_data);
         }
         break;
+    case BTA_GATTS_CONF_EVT:
+        if (p_data && p_data->req_data.value){
+            osi_free(p_data->req_data.value);
+        }
+        break;
     default:
         break;
     }
@@ -787,6 +792,12 @@ void btc_gatts_cb_handler(btc_msg_t *msg)
         param.conf.conn_id = BTC_GATT_GET_CONN_ID(p_data->req_data.conn_id);
         param.conf.status = p_data->req_data.status;
 
+        if (p_data->req_data.status != ESP_GATT_OK && p_data->req_data.value){
+            param.conf.len = p_data->req_data.data_len;
+            param.conf.value = p_data->req_data.value;
+        }else{
+            param.conf.len = 0;
+        }
         btc_gatts_cb_to_app(ESP_GATTS_CONF_EVT, gatts_if, &param);
         break;
     case BTA_GATTS_CREATE_EVT:
@@ -821,7 +832,7 @@ void btc_gatts_cb_handler(btc_msg_t *msg)
         param.add_char_descr.status = p_data->add_result.status;
         param.add_char_descr.attr_handle = p_data->add_result.attr_id;
         param.add_char_descr.service_handle = p_data->add_result.service_id;
-        bta_to_btc_uuid(&param.add_char_descr.char_uuid, &p_data->add_result.char_uuid);
+        bta_to_btc_uuid(&param.add_char_descr.descr_uuid, &p_data->add_result.char_uuid);
 
         btc_gatts_cb_to_app(ESP_GATTS_ADD_CHAR_DESCR_EVT, gatts_if, &param);
         break;
@@ -849,7 +860,6 @@ void btc_gatts_cb_handler(btc_msg_t *msg)
     case BTA_GATTS_CONNECT_EVT:
         gatts_if = p_data->conn.server_if;
         param.connect.conn_id = BTC_GATT_GET_CONN_ID(p_data->conn.conn_id);
-        param.connect.is_connected = true;
         memcpy(param.connect.remote_bda, p_data->conn.remote_bda, ESP_BD_ADDR_LEN);
 
         btc_gatts_cb_to_app(ESP_GATTS_CONNECT_EVT, gatts_if, &param);
@@ -857,7 +867,7 @@ void btc_gatts_cb_handler(btc_msg_t *msg)
     case BTA_GATTS_DISCONNECT_EVT:
         gatts_if = p_data->conn.server_if;
         param.disconnect.conn_id = BTC_GATT_GET_CONN_ID(p_data->conn.conn_id);
-        param.disconnect.is_connected = false;
+        param.disconnect.reason = p_data->conn.reason;
         memcpy(param.disconnect.remote_bda, p_data->conn.remote_bda, ESP_BD_ADDR_LEN);
 
         btc_gatts_cb_to_app(ESP_GATTS_DISCONNECT_EVT, gatts_if, &param);

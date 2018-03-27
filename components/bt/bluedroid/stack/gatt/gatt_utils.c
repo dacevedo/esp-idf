@@ -861,7 +861,7 @@ tGATTS_SRV_CHG *gatt_is_bda_in_the_srv_chg_clt_list (BD_ADDR bda)
     list_t *list = fixed_queue_get_list(gatt_cb.srv_chg_clt_q);
     for (const list_node_t *node = list_begin(list); node != list_end(list);
          node = list_next(node)) {
-        tGATTS_SRV_CHG *p_buf = (tGATTS_SRV_CHG *)list_node(node);
+        p_buf = (tGATTS_SRV_CHG *)list_node(node);
         if (!memcmp( bda, p_buf->bda, BD_ADDR_LEN)) {
             GATT_TRACE_DEBUG("bda is in the srv chg clt list");
             break;
@@ -1255,7 +1255,7 @@ void gatt_start_ind_ack_timer(tGATT_TCB *p_tcb)
     p_tcb->ind_ack_timer_ent.param  = (TIMER_PARAM_TYPE)p_tcb;
     /* start notification cache timer */
     btu_start_timer (&p_tcb->ind_ack_timer_ent, BTU_TTYPE_ATT_WAIT_FOR_IND_ACK,
-                     GATT_WAIT_FOR_RSP_TOUT);
+                     GATT_WAIT_FOR_IND_ACK_TOUT);
 
 }
 /*******************************************************************************
@@ -1683,6 +1683,7 @@ tGATT_CLCB *gatt_clcb_alloc (UINT16 conn_id)
 void gatt_clcb_dealloc (tGATT_CLCB *p_clcb)
 {
     if (p_clcb && p_clcb->in_use) {
+        btu_free_timer(&p_clcb->rsp_timer_ent);
         memset(p_clcb, 0, sizeof(tGATT_CLCB));
     }
 }
@@ -1999,6 +2000,29 @@ BOOLEAN gatt_find_app_hold_link(tGATT_TCB *p_tcb, UINT8 start_idx, UINT8 *p_foun
 
 /*******************************************************************************
 **
+** Function         gatt_find_specific_app_in_hold_link
+**
+** Description      find the specific applicaiton that is holding the specified link
+**
+** Returns         Boolean
+**
+*******************************************************************************/
+BOOLEAN gatt_find_specific_app_in_hold_link(tGATT_TCB *p_tcb, tGATT_IF p_gatt_if)
+{
+    UINT8 i;
+    BOOLEAN found = FALSE;
+
+    for (i = 0; i < GATT_MAX_APPS; i ++) {
+        if (p_tcb->app_hold_link[i] && p_tcb->app_hold_link[i] == p_gatt_if) {
+            found = TRUE;
+            break;
+        }
+    }
+    return found;
+}
+
+/*******************************************************************************
+**
 ** Function         gatt_cmd_enq
 **
 ** Description      Enqueue this command.
@@ -2211,8 +2235,8 @@ void gatt_cleanup_upon_disc(BD_ADDR bda, UINT16 reason, tBT_TRANSPORT transport)
             }
         }
 
-        btu_stop_timer (&p_tcb->ind_ack_timer_ent);
-        btu_stop_timer (&p_tcb->conf_timer_ent);
+        btu_free_timer (&p_tcb->ind_ack_timer_ent);
+        btu_free_timer (&p_tcb->conf_timer_ent);
         gatt_free_pending_ind(p_tcb);
         gatt_free_pending_enc_queue(p_tcb);
         gatt_free_pending_prepare_write_queue(p_tcb);

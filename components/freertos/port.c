@@ -298,6 +298,7 @@ void vPortAssertIfInISR()
  * For kernel use: Initialize a per-CPU mux. Mux will be initialized unlocked.
  */
 void vPortCPUInitializeMutex(portMUX_TYPE *mux) {
+
 #ifdef CONFIG_FREERTOS_PORTMUX_DEBUG
 	ets_printf("Initializing mux %p\n", mux);
 	mux->lastLockedFn="(never locked)";
@@ -372,6 +373,34 @@ void vPortSetStackWatchpoint( void* pxStackStart ) {
 	addr=(addr+31)&(~31);
 	esp_set_watchpoint(1, (char*)addr, 32, ESP_WATCHPOINT_STORE);
 }
+
+#if defined(CONFIG_SPIRAM_SUPPORT)
+/*
+ * Compare & set (S32C1) does not work in external RAM. Instead, this routine uses a mux (in internal memory) to fake it.
+ */
+static portMUX_TYPE extram_mux = portMUX_INITIALIZER_UNLOCKED;
+
+void uxPortCompareSetExtram(volatile uint32_t *addr, uint32_t compare, uint32_t *set) {
+	uint32_t prev;
+#ifdef CONFIG_FREERTOS_PORTMUX_DEBUG
+	vPortCPUAcquireMutexIntsDisabled(&extram_mux, portMUX_NO_TIMEOUT, __FUNCTION__, __LINE__);
+#else
+	vPortCPUAcquireMutexIntsDisabled(&extram_mux, portMUX_NO_TIMEOUT); 
+#endif
+	prev=*addr;
+	if (prev==compare) {
+		*addr=*set;
+	}
+	*set=prev;
+#ifdef CONFIG_FREERTOS_PORTMUX_DEBUG
+	vPortCPUReleaseMutexIntsDisabled(&extram_mux, __FUNCTION__, __LINE__);
+#else
+	vPortCPUReleaseMutexIntsDisabled(&extram_mux);
+#endif
+}
+#endif //defined(CONFIG_SPIRAM_SUPPORT)
+
+
 
 uint32_t xPortGetTickRateHz(void) {
 	return (uint32_t)configTICK_RATE_HZ;
