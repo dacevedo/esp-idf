@@ -333,8 +333,7 @@ esp_err_t spi_bus_add_device(spi_host_device_t host, const spi_device_interface_
     SPI_CHECK(freecs!=NO_CS, "no free cs pins for host", ESP_ERR_NOT_FOUND);
     //The hardware looks like it would support this, but actually setting cs_ena_pretrans when transferring in full
     //duplex mode does absolutely nothing on the ESP32.
-    SPI_CHECK(dev_config->cs_ena_pretrans <= 1 || (dev_config->flags & SPI_DEVICE_HALFDUPLEX), "cs pretrans delay > 1 incompatible with full-duplex", ESP_ERR_INVALID_ARG);
-    SPI_CHECK( dev_config->cs_ena_pretrans != 1 || (dev_config->address_bits == 0 && dev_config->command_bits == 0) ||
+    SPI_CHECK( dev_config->cs_ena_pretrans <= 1 || (dev_config->address_bits == 0 && dev_config->command_bits == 0) ||
         (dev_config->flags & SPI_DEVICE_HALFDUPLEX), "In full-duplex mode, only support cs pretrans delay = 1 and without address_bits and command_bits", ESP_ERR_INVALID_ARG);
 
     duty_cycle = (dev_config->duty_cycle_pos==0? 128: dev_config->duty_cycle_pos);
@@ -414,7 +413,7 @@ esp_err_t spi_bus_remove_device(spi_device_handle_t handle)
     SPI_CHECK(handle->host->cur_cs == NO_CS || handle->host->device[handle->host->cur_cs]!=handle, "Have unfinished transactions", ESP_ERR_INVALID_STATE);
     SPI_CHECK(uxQueueMessagesWaiting(handle->ret_queue)==0, "Have unfinished transactions", ESP_ERR_INVALID_STATE);
 
-    //return 
+    //return
     int spics_io_num = handle->cfg.spics_io_num;
     if (spics_io_num >= 0) spicommon_cs_free_io(spics_io_num);
 
@@ -711,25 +710,37 @@ static void SPI_MASTER_ISR_ATTR spi_intr(void *arg)
 
         //Configure bit sizes, load addr and command
         int cmdlen;
-        if ( trans->flags & SPI_TRANS_VARIABLE_CMD ) {
-            cmdlen = ((spi_transaction_ext_t*)trans)->command_bits;
-        } else {
-            cmdlen = dev->cfg.command_bits;
-        }
         int addrlen;
-        if ( trans->flags & SPI_TRANS_VARIABLE_ADDR ) {
-            addrlen = ((spi_transaction_ext_t*)trans)->address_bits;
+        if (!(dev->cfg.flags & SPI_DEVICE_HALFDUPLEX) && dev->cfg.cs_ena_pretrans != 0) {
+            /* The command and address phase is not compatible with cs_ena_pretrans
+             * in full duplex mode.
+             */
+            cmdlen = 0;
+            addrlen = 0;
         } else {
-            addrlen = dev->cfg.address_bits;
+            if (trans->flags & SPI_TRANS_VARIABLE_CMD) {
+                cmdlen = ((spi_transaction_ext_t *)trans)->command_bits;
+            } else {
+                cmdlen = dev->cfg.command_bits;
+            }
+            if (trans->flags & SPI_TRANS_VARIABLE_ADDR) {
+                addrlen = ((spi_transaction_ext_t *)trans)->address_bits;
+            } else {
+                addrlen = dev->cfg.address_bits;
+            }
         }
+
         host->hw->user1.usr_addr_bitlen=addrlen-1;
         host->hw->user2.usr_command_bitlen=cmdlen-1;
         host->hw->user.usr_addr=addrlen?1:0;
         host->hw->user.usr_command=cmdlen?1:0;
 
-        // output command will be sent from bit 7 to 0 of command_value, and then bit 15 to 8 of the same register field.
-        uint16_t command = trans->cmd << (16-cmdlen);    //shift to MSB
-        host->hw->user2.usr_command_value = (command>>8)|(command<<8);  //swap the first and second byte
+        /* Output command will be sent from bit 7 to 0 of command_value, and
+         * then bit 15 to 8 of the same register field. Shift and swap to send
+         * more straightly.
+         */
+        host->hw->user2.usr_command_value = SPI_SWAP_DATA_TX(trans->cmd, cmdlen);
+
         // shift the address to MSB of addr (and maybe slv_wr_status) register.
         // output address will be sent from MSB to LSB of addr register, then comes the MSB to LSB of slv_wr_status register.
         if (addrlen>32) {

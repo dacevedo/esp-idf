@@ -343,19 +343,21 @@ TEST_CASE("disable source trigger behavior", "[deepsleep]")
 static RTC_DATA_ATTR struct timeval start;
 static void trigger_deepsleep(void)
 {
-    printf("Trigger deep sleep. Waiting 30 sec ...\n");
+    printf("Trigger deep sleep. Waiting for 10 sec ...\n");
 
     // Simulate the dispersion of the calibration coefficients at start-up.
     // Corrupt the calibration factor.
-    esp_clk_slowclk_cal_set(esp_clk_slowclk_cal_get() - 1000000);
+    esp_clk_slowclk_cal_set(esp_clk_slowclk_cal_get() / 2);
     esp_set_time_from_rtc();
 
     // Delay for time error accumulation.
-    vTaskDelay(30000/portTICK_RATE_MS);
+    vTaskDelay(10000/portTICK_RATE_MS);
 
     // Save start time. Deep sleep.
     gettimeofday(&start, NULL);
     esp_sleep_enable_timer_wakeup(1000);
+    // In function esp_deep_sleep_start() uses function esp_sync_counters_rtc_and_frc() 
+    // to prevent a negative time after wake up.
     esp_deep_sleep_start();
 }
 
